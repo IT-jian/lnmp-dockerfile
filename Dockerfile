@@ -1,5 +1,4 @@
 #1.Base Image
-#FROM alpine
 FROM php:7.2-fpm-alpine
 
 # ensure www-data user exists
@@ -14,9 +13,10 @@ ENV MAX_UPLOAD          50M
 ENV PHP_MAX_FILE_UPLOAD 200
 ENV PHP_MAX_POST        100M
 ENV COMPOSER_ALLOW_SUPERUSER 1
+ENV CODE_PATH /usr/share/nginx/html
+ENV PHP_ENV_FILE .env_production
 
-
-#安装nginx supervisor 等软件
+#安装基本工具
 RUN apk add --update nginx \
 openssh \
 supervisor \
@@ -33,87 +33,51 @@ wget \
 sudo
 
 #2.ADD-PHP-FPM
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+RUN apk update && apk add --no-cache --virtual .build-deps \
+    $PHPIZE_DEPS \
+    curl-dev \
+    imagemagick-dev \
+    libtool \
+    libxml2-dev \
+    postgresql-dev \
+    sqlite-dev \
+    libmcrypt-dev \
+    freetype-dev \
+    libjpeg-turbo-dev \
+    libpng-dev \
+  && apk add --no-cache \
+    curl \
+    imagemagick \ 
+    mysql-client \
+    postgresql-libs \
+  && pecl install mcrypt-1.0.1 \
+  && pecl install yac-2.0.2 \
+  && docker-php-ext-install zip \
+  && docker-php-ext-install pdo_mysql \
+  && docker-php-ext-install opcache \
+  && docker-php-ext-install mysqli \
+  && docker-php-ext-enable mcrypt \
+  && docker-php-ext-enable yac \
+  && docker-php-ext-install \
+    curl \
+    mbstring \
+    pdo \
+    pdo_mysql \
+    pdo_pgsql \
+    pdo_sqlite \
+    pcntl \
+    tokenizer \
+    xml \
+    zip \
+    && docker-php-ext-install -j"$(getconf _NPROCESSORS_ONLN)" iconv \
+  && docker-php-ext-configure gd --with-freetype-dir=/usr/include/ --with-jpeg-dir=/usr/include/ \
+  && docker-php-ext-install -j"$(getconf _NPROCESSORS_ONLN)" gd \
+  && pecl install -o -f redis \
+  && rm -rf /tmp/pear \
+  && docker-php-ext-enable redis \
+  && rm -r /var/cache/apk/*
 
-# Mirror mirror switch to Alpine Linux - http://dl-4.alpinelinux.org/alpine/
-RUN apk update \
-	&& apk upgrade \
-	&& apk add \
-		curl \
-		tzdata \
-		php7-fpm\
-	    php7 \
-	    php7-dev \
-	    php7-apcu \
-	    php7-bcmath \
-	    php7-xmlwriter \
-	    php7-ctype \
-	    php7-curl \
-	    php7-exif \
-	    php7-iconv \
-	    php7-intl \
-	    php7-json \
-	    php7-mbstring\
-	    php7-opcache \
-	    php7-openssl \
-	    php7-pcntl \
-	    php7-pdo \
-	    php7-mysqlnd \
-	    php7-mysqli \
-	    php7-pdo_mysql \
-	    php7-pdo_pgsql \
-	    php7-phar \
-	    php7-posix \
-	    php7-session \
-	    php7-xml \
-	    php7-simplexml \
-	    php7-mcrypt \
-	    php7-xsl \
-	    php7-zip \
-	    php7-zlib \
-	    php7-dom \
-	    php7-redis\
-	    php7-tokenizer \
-	    php7-gd \
-	    php7-fileinfo \
-	    php7-zmq \
-	    php7-memcached \
-	    php7-xmlreader \
- 	&& cp /usr/share/zoneinfo/${TIMEZONE} /etc/localtime \
-	&& echo "${TIMEZONE}" > /etc/timezone \
-	&& apk del tzdata \
- 	&& rm -rf /var/cache/apk/*
-
-#install yac
-RUN pecl install yac-2.0.2 && \
-echo -e "[yac] \
-extension=yac.so \
-yac.enable=1 \
-yac.keys_memory_size=4M \
-yac.values_memory_size=64M \
-yac.compress_threshold=-1 \
-yac.enable_cli=0" > /etc/php7/conf.d/yac.ini && \
-pecl clear-cache
-
-#RUN pecl install yac-2.0.1 && /usr/local/bin/docker-php-ext-enable yac
-
-#RUN wget http://pecl.php.net/get/yac-2.1.1.tgz -O /tmp/yac.tar.tgz \
-#    && pecl install /tmp/yac.tar.tgz \
-#    && rm -rf /tmp/yac.tar.tgz \
-#    && docker-php-ext-enable yac
-
-#RUN wget http://pecl.php.net/get/yac-2.1.1.tgz -O yac.tgz \
-#    && mkdir -p yac \
-#    && tar -zxvf yac.tgz -C yac --strip-components=1 \
-#    && rm yac.tgz \
-#    && ( \
-#        cd yac \
-#        && phpize \
-#        && ./configure --enable-yac \
-#        && make -j$(nproc) \
-#        && make install \
-#    ) \
-#    && rm -r yac \
-#    && docker-php-ext-enable yac
 
 # https://github.com/docker-library/php/issues/240
 # https://gist.github.com/guillemcanal/be3db96d3caa315b4e2b8259cab7d07e
@@ -129,17 +93,16 @@ COPY docker/php/www.conf /etc/php7/php-fpm.d/
 #RUN rm -rf /var/cache/apk/*
 
 # Set environments
-RUN sed -i "s|;*date.timezone =.*|date.timezone = ${TIMEZONE}|i" /etc/php7/php.ini && \
-	sed -i "s|;*memory_limit =.*|memory_limit = ${PHP_MEMORY_LIMIT}|i" /etc/php7/php.ini && \
-	sed -i "s|;*upload_max_filesize =.*|upload_max_filesize = ${MAX_UPLOAD}|i" /etc/php7/php.ini && \
-	sed -i "s|;*max_file_uploads =.*|max_file_uploads = ${PHP_MAX_FILE_UPLOAD}|i" /etc/php7/php.ini && \
-	sed -i "s|;*post_max_size =.*|post_max_size = ${PHP_MAX_POST}|i" /etc/php7/php.ini && \
-	sed -i "s|;*cgi.fix_pathinfo=.*|cgi.fix_pathinfo= 0|i" /etc/php7/php.ini
+RUN sed -i "s|;*date.timezone =.*|date.timezone = ${TIMEZONE}|i" /usr/local/etc/php/php.ini-production && \
+       sed -i "s|;*memory_limit =.*|memory_limit = ${PHP_MEMORY_LIMIT}|i" /usr/local/etc/php/php.ini-production && \
+       sed -i "s|;*upload_max_filesize =.*|upload_max_filesize = ${MAX_UPLOAD}|i" /usr/local/etc/php/php.ini-production && \
+       sed -i "s|;*max_file_uploads =.*|max_file_uploads = ${PHP_MAX_FILE_UPLOAD}|i" /usr/local/etc/php/php.ini-production && \
+       sed -i "s|;*post_max_size =.*|post_max_size = ${PHP_MAX_POST}|i" /usr/local/etc/php/php.ini-production && \
+       sed -i "s|;*cgi.fix_pathinfo=.*|cgi.fix_pathinfo= 0|i" /usr/local/etc/php/php.ini-production
 
 #3.Install-Composer
 RUN curl -sS https://getcomposer.org/installer | \
     php -- --install-dir=/usr/bin/ --filename=composer
-
 
 
 #4.ADD-NGINX
@@ -206,3 +169,5 @@ RUN chmod +x /usr/share/nginx/entrypoint.sh
 
 #CMD ["supervisord", "--nodaemon", "--configuration", "/etc/supervisor/conf.d/supervisord.conf"]
 ENTRYPOINT ["/usr/share/nginx/entrypoint.sh"]
+
+EXPOSE 80
