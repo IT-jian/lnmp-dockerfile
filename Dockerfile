@@ -86,6 +86,7 @@ RUN apk update && apk add --no-cache --virtual .build-deps \
 RUN mkdir -p /usr/local/var/log/php7/
 RUN mkdir -p /usr/local/var/run/
 COPY docker/php/php-fpm.conf /etc/php7/
+COPY docker/php/php-fpm.conf /usr/local/etc/
 COPY docker/php/www.conf /etc/php7/php-fpm.d/
 
 #RUN apk add --no-cache --repository http://dl-3.alpinelinux.org/alpine/edge/testing gnu-libiconv
